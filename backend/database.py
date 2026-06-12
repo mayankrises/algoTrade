@@ -3,39 +3,96 @@ import os
 import json
 from datetime import datetime
 
-DB_PATH = os.getenv("DATABASE_URL", os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db"))
+# Try importing psycopg2 for optional PostgreSQL connectivity
+try:
+    import psycopg2
+    import psycopg2.extras
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
+
+DB_PATH = os.getenv("DATABASE_URL", "")
+
+def is_postgresql():
+    return HAS_PSYCOPG2 and (DB_PATH.startswith("postgresql://") or DB_PATH.startswith("postgres://"))
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if is_postgresql():
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(DB_PATH)
+        return conn
+    else:
+        # Fallback to local SQLite
+        sqlite_file = DB_PATH if DB_PATH and not (DB_PATH.startswith("postgresql://") or DB_PATH.startswith("postgres://")) else os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
+        conn = sqlite3.connect(sqlite_file)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+def execute_query(conn, cursor, query, params=None):
+    is_pg = is_postgresql()
+    # Standardise placeholders: replace %s with ? if SQLite is being used
+    if not is_pg:
+        query = query.replace("%s", "?")
+    
+    if params is not None:
+        cursor.execute(query, params)
+    else:
+        cursor.execute(query)
+
+def fetch_all_as_dicts(cursor, is_pg):
+    if is_pg:
+        return list(cursor.fetchall())
+    else:
+        return [dict(row) for row in cursor.fetchall()]
+
+def fetch_one_as_dict(cursor, is_pg):
+    row = cursor.fetchone()
+    if row:
+        return dict(row)
+    return None
 
 def init_db():
     conn = get_db_connection()
+    is_pg = is_postgresql()
     cursor = conn.cursor()
     
     # 1. trades table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker TEXT NOT NULL,
-        strategy TEXT NOT NULL,
-        mode TEXT NOT NULL, -- 'backtest' or 'paper'
-        entry_time TEXT NOT NULL,
-        entry_price REAL NOT NULL,
-        exit_time TEXT NOT NULL,
-        exit_price REAL NOT NULL,
-        quantity REAL NOT NULL,
-        pnl REAL NOT NULL,
-        return_pct REAL NOT NULL,
-        exit_reason TEXT
-    )
-    """)
+    if is_pg:
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS trades (
+            id SERIAL PRIMARY KEY,
+            ticker TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            mode TEXT NOT NULL, -- 'backtest' or 'paper'
+            entry_time TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            exit_time TEXT NOT NULL,
+            exit_price REAL NOT NULL,
+            quantity REAL NOT NULL,
+            pnl REAL NOT NULL,
+            return_pct REAL NOT NULL,
+            exit_reason TEXT
+        )
+        """)
+    else:
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            entry_time TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            exit_time TEXT NOT NULL,
+            exit_price REAL NOT NULL,
+            quantity REAL NOT NULL,
+            pnl REAL NOT NULL,
+            return_pct REAL NOT NULL,
+            exit_reason TEXT
+        )
+        """)
     
-    # Drop and Re-create paper_state for composite key migration safety
-    cursor.execute("DROP TABLE IF EXISTS paper_state")
-    
-    # 2. paper_state table
+    # 2. paper_state table (identical key setup compatible across both dialects)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS paper_state (
         ticker TEXT NOT NULL,
@@ -55,10 +112,12 @@ def init_db():
 def save_trade(trade_data: dict):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
+    
+    query = """
     INSERT INTO trades (ticker, strategy, mode, entry_time, entry_price, exit_time, exit_price, quantity, pnl, return_pct, exit_reason)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    execute_query(conn, cursor, query, (
         trade_data["ticker"],
         trade_data["strategy"],
         trade_data["mode"],
@@ -76,79 +135,102 @@ def save_trade(trade_data: dict):
 
 def get_all_trades():
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM trades ORDER BY exit_time DESC")
-    rows = cursor.fetchall()
+    is_pg = is_postgresql()
+    if is_pg:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cursor = conn.cursor()
+        
+    query = "SELECT * FROM trades ORDER BY exit_time DESC"
+    execute_query(conn, cursor, query)
+    rows = fetch_all_as_dicts(cursor, is_pg)
     conn.close()
-    return [dict(row) for row in rows]
+    return rows
 
 def get_paper_state(ticker: str, strategy: str):
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM paper_state WHERE ticker = ? AND strategy = ?", (ticker, strategy))
-    row = cursor.fetchone()
+    is_pg = is_postgresql()
+    if is_pg:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cursor = conn.cursor()
+        
+    query = "SELECT * FROM paper_state WHERE ticker = %s AND strategy = %s"
+    execute_query(conn, cursor, query, (ticker, strategy))
+    row = fetch_one_as_dict(cursor, is_pg)
     conn.close()
+    
     if row:
-        state = dict(row)
         # Parse current_position JSON if it exists
-        if state["current_position"]:
-            state["current_position"] = json.loads(state["current_position"])
-        return state
+        if row["current_position"]:
+            row["current_position"] = json.loads(row["current_position"])
+        return row
     return None
 
 def get_all_paper_states():
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM paper_state")
-    rows = cursor.fetchall()
+    is_pg = is_postgresql()
+    if is_pg:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cursor = conn.cursor()
+        
+    query = "SELECT * FROM paper_state"
+    execute_query(conn, cursor, query)
+    rows = fetch_all_as_dicts(cursor, is_pg)
     conn.close()
     
     states = []
     for row in rows:
-        state = dict(row)
-        if state["current_position"]:
-            state["current_position"] = json.loads(state["current_position"])
-        states.append(state)
+        if row["current_position"]:
+            row["current_position"] = json.loads(row["current_position"])
+        states.append(row)
     return states
 
 def update_paper_state(ticker: str, strategy: str, is_running: int = None, 
-                       capital: float = None, current_position: dict = None, last_signal: str = None):
+                        capital: float = None, current_position: dict = None, last_signal: str = None):
     conn = get_db_connection()
-    cursor = conn.cursor()
+    is_pg = is_postgresql()
+    if is_pg:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cursor = conn.cursor()
     
     # Check if this bot state already exists
-    cursor.execute("SELECT * FROM paper_state WHERE ticker = ? AND strategy = ?", (ticker, strategy))
-    row = cursor.fetchone()
+    query_select = "SELECT * FROM paper_state WHERE ticker = %s AND strategy = %s"
+    execute_query(conn, cursor, query_select, (ticker, strategy))
+    row = fetch_one_as_dict(cursor, is_pg)
     
     updated_at = datetime.now().isoformat()
     
     if row:
-        state = dict(row)
-        new_is_running = is_running if is_running is not None else state["is_running"]
-        new_capital = capital if capital is not None else state["capital"]
+        new_is_running = is_running if is_running is not None else row["is_running"]
+        new_capital = capital if capital is not None else row["capital"]
         
         if current_position is not None:
             new_position_str = json.dumps(current_position) if current_position else None
         else:
-            new_position_str = state["current_position"]
+            new_position_str = row["current_position"]
             
-        new_last_signal = last_signal if last_signal is not None else state["last_signal"]
+        new_last_signal = last_signal if last_signal is not None else row["last_signal"]
         
-        cursor.execute("""
+        query_update = """
         UPDATE paper_state
-        SET is_running = ?, capital = ?, current_position = ?, last_signal = ?, updated_at = ?
-        WHERE ticker = ? AND strategy = ?
-        """, (new_is_running, new_capital, new_position_str, new_last_signal, updated_at, ticker, strategy))
+        SET is_running = %s, capital = %s, current_position = %s, last_signal = %s, updated_at = %s
+        WHERE ticker = %s AND strategy = %s
+        """
+        execute_query(conn, cursor, query_update, (new_is_running, new_capital, new_position_str, new_last_signal, updated_at, ticker, strategy))
     else:
         new_is_running = is_running if is_running is not None else 0
         new_capital = capital if capital is not None else 100000.0
         new_position_str = json.dumps(current_position) if current_position else None
         new_last_signal = last_signal if last_signal is not None else "HOLD"
         
-        cursor.execute("""
+        query_insert = """
         INSERT INTO paper_state (ticker, strategy, is_running, capital, current_position, last_signal, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (ticker, strategy, new_is_running, new_capital, new_position_str, new_last_signal, updated_at))
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        execute_query(conn, cursor, query_insert, (ticker, strategy, new_is_running, new_capital, new_position_str, new_last_signal, updated_at))
         
     conn.commit()
     conn.close()
