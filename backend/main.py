@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+import re
 from backend import database, backtester
 from backend.paper_trader import paper_trader_bot
 
@@ -50,6 +51,12 @@ class PaperStopRequest(BaseModel):
     ticker: str
     strategy: str
 
+class CustomStrategyRequest(BaseModel):
+    name: str          # identifier slug, e.g. "macd_cross"
+    display_name: str  # human-readable, e.g. "MACD Crossover"
+    description: Optional[str] = ""
+    code: str          # full Python source code
+
 @app.get("/health")
 def health_check():
     return {"status": "ok", "db_connected": True}
@@ -73,14 +80,15 @@ def run_backtest(req: BacktestRequest):
 
 @app.get("/strategies")
 def get_strategies():
-    return [
+    builtin = [
         {
             "id": "sma",
             "name": "SMA Crossover",
-            "description": "Uses 20 Simple Moving Average (SMA) and 50 Simple Moving Average (SMA) technical lines to catch market crossovers.",
+            "description": "Uses 20 SMA and 50 SMA lines to catch market crossovers.",
             "entry_rule": "Buy when the 20 SMA crosses above the 50 SMA.",
             "exit_rule": "Sell when the 20 SMA crosses below the 50 SMA.",
-            "risk_rule": "Uses maximum available virtual cash for ordering."
+            "risk_rule": "Uses maximum available virtual cash for ordering.",
+            "is_custom": False
         },
         {
             "id": "rsi",
@@ -88,17 +96,85 @@ def get_strategies():
             "description": "Uses Relative Strength Index (RSI) bounds to identify extreme market prices.",
             "entry_rule": "Buy when RSI crosses below the 30 oversold limit.",
             "exit_rule": "Sell when RSI crosses above the 70 overbought limit.",
-            "risk_rule": "Uses maximum available virtual cash for ordering."
+            "risk_rule": "Uses maximum available virtual cash for ordering.",
+            "is_custom": False
         },
         {
             "id": "sr_bounce",
             "name": "Support/Resistance Bounce",
-            "description": "Detects local support and resistance lines based on 20-period price bounds, taking bounce reversals.",
+            "description": "Detects local support and resistance lines based on 20-period price bounds.",
             "entry_rule": "Buy when price dips below support and closes back above it.",
             "exit_rule": "Sell when price touches resistance and closes back below it.",
-            "risk_rule": "Uses maximum available virtual cash for ordering."
+            "risk_rule": "Uses maximum available virtual cash for ordering.",
+            "is_custom": False
         }
     ]
+    try:
+        custom = database.get_all_custom_strategies()
+        for c in custom:
+            builtin.append({
+                "id": c["name"],
+                "name": c["display_name"],
+                "description": c.get("description", ""),
+                "entry_rule": "Defined in custom code.",
+                "exit_rule": "Defined in custom code.",
+                "risk_rule": "Defined in custom code.",
+                "is_custom": True,
+                "created_at": c.get("created_at", "")
+            })
+    except Exception as e:
+        print(f"Warning: could not load custom strategies: {e}")
+    return builtin
+
+# ── Custom Strategy Endpoints ────────────────────────────────────────────────
+
+@app.post("/strategies/custom")
+def create_custom_strategy(req: CustomStrategyRequest):
+    # Validate slug format
+    if not re.match(r'^[a-z0-9_]+$', req.name):
+        raise HTTPException(
+            status_code=400,
+            detail="Strategy name must be lowercase alphanumeric with underscores only (e.g. 'macd_cross')."
+        )
+    # Validate code has required functions
+    if "def run_backtest" not in req.code:
+        raise HTTPException(
+            status_code=400,
+            detail="Strategy code must define a 'run_backtest(df, capital, ticker_name)' function."
+        )
+    try:
+        # Check if already exists — if so, update it
+        existing = database.get_custom_strategy_by_name(req.name)
+        if existing:
+            database.update_custom_strategy(req.name, req.display_name, req.description or "", req.code)
+            return {"status": "updated", "name": req.name}
+        else:
+            database.save_custom_strategy(req.name, req.display_name, req.description or "", req.code)
+            return {"status": "created", "name": req.name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save strategy: {e}")
+
+@app.get("/strategies/custom")
+def list_custom_strategies():
+    try:
+        return database.get_all_custom_strategies()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/strategies/custom/{name}")
+def get_custom_strategy(name: str):
+    record = database.get_custom_strategy_by_name(name)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Custom strategy '{name}' not found.")
+    return record
+
+@app.delete("/strategies/custom/{name}")
+def delete_custom_strategy(name: str):
+    record = database.get_custom_strategy_by_name(name)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Custom strategy '{name}' not found.")
+    database.delete_custom_strategy(name)
+    return {"status": "deleted", "name": name}
 
 @app.get("/trades")
 def get_trades():

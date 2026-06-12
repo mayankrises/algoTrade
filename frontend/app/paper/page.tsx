@@ -130,6 +130,13 @@ export default function PaperTrading() {
   const [strategy, setStrategy] = useState("sma");
   const [capital, setCapital] = useState(100000);
 
+  // Available strategies (fetched from API)
+  const [availableStrategies, setAvailableStrategies] = useState<{id: string; name: string; is_custom?: boolean}[]>([
+    { id: "sma", name: "SMA Crossover (20/50)" },
+    { id: "rsi", name: "RSI Strategy (30/70)" },
+    { id: "sr_bounce", name: "Support/Resistance Bounce" }
+  ]);
+
   // States
   const [bots, setBots] = useState<PaperStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -157,8 +164,24 @@ export default function PaperTrading() {
   // Poll status on mount
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 3000); // Poll status every 3s
+    const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Fetch strategies list
+  useEffect(() => {
+    const fetchStrategies = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/strategies`);
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableStrategies(data.map((s: any) => ({ id: s.id, name: s.name, is_custom: s.is_custom })));
+        }
+      } catch (e) {
+        console.error("Failed to fetch strategies list:", e);
+      }
+    };
+    fetchStrategies();
   }, []);
 
   // Update strategy parameter from url parameter if parsed
@@ -331,6 +354,13 @@ export default function PaperTrading() {
                 <option value="sma">SMA Crossover (20/50)</option>
                 <option value="rsi">RSI Strategy (30/70)</option>
                 <option value="sr_bounce">Support/Resistance Bounce</option>
+                {availableStrategies.filter(s => s.is_custom).length > 0 && (
+                  <optgroup label="Custom Strategies">
+                    {availableStrategies.filter(s => s.is_custom).map(s => (
+                      <option key={s.id} value={s.id}>⚡ {s.name}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
 

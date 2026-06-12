@@ -52,6 +52,29 @@ export default function Backtest() {
   const [endDate, setEndDate] = useState("2025-01-01");
   const [timeframe, setTimeframe] = useState("1d");
 
+  // Available strategies (fetched from API)
+  const [availableStrategies, setAvailableStrategies] = useState<{id: string; name: string; is_custom?: boolean}[]>([
+    { id: "sma", name: "SMA Crossover (20/50)" },
+    { id: "rsi", name: "RSI Strategy (30/70)" },
+    { id: "sr_bounce", name: "Support/Resistance Bounce" }
+  ]);
+
+  // Fetch strategies list
+  useEffect(() => {
+    const fetchStrategies = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/strategies`);
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableStrategies(data.map((s: any) => ({ id: s.id, name: s.name, is_custom: s.is_custom })));
+        }
+      } catch (e) {
+        console.error("Failed to fetch strategies list:", e);
+      }
+    };
+    fetchStrategies();
+  }, []);
+
   // Read preselected strategy from query parameters if loaded
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -288,9 +311,16 @@ export default function Backtest() {
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label>Strategy</label>
             <select className="select" value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-              <option value="sma">SMA Crossover (20/50)</option>
-              <option value="rsi">RSI Strategy (30/70)</option>
-              <option value="sr_bounce">Support/Resistance Bounce</option>
+              {availableStrategies.filter(s => !s.is_custom).map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+              {availableStrategies.some(s => s.is_custom) && (
+                <optgroup label="Custom Strategies">
+                  {availableStrategies.filter(s => s.is_custom).map(s => (
+                    <option key={s.id} value={s.id}>⚡ {s.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
 

@@ -99,12 +99,36 @@ def init_db():
         strategy TEXT NOT NULL,
         is_running INTEGER DEFAULT 0,
         capital REAL DEFAULT 100000.0,
-        current_position TEXT, -- JSON string representing open position
+        current_position TEXT,
         last_signal TEXT DEFAULT 'HOLD',
         updated_at TEXT,
         PRIMARY KEY (ticker, strategy)
     )
     """)
+
+    # 3. custom_strategies table
+    if is_pg:
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS custom_strategies (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            description TEXT,
+            code TEXT NOT NULL,
+            created_at TEXT
+        )
+        """)
+    else:
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS custom_strategies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            description TEXT,
+            code TEXT NOT NULL,
+            created_at TEXT
+        )
+        """)
         
     conn.commit()
     conn.close()
@@ -232,5 +256,71 @@ def update_paper_state(ticker: str, strategy: str, is_running: int = None,
         """
         execute_query(conn, cursor, query_insert, (ticker, strategy, new_is_running, new_capital, new_position_str, new_last_signal, updated_at))
         
+    conn.commit()
+    conn.close()
+
+# ── Custom Strategy CRUD ─────────────────────────────────────────────────────
+
+def save_custom_strategy(name: str, display_name: str, description: str, code: str):
+    conn = get_db_connection()
+    is_pg = is_postgresql()
+    cursor = conn.cursor()
+    created_at = datetime.now().isoformat()
+
+    query = """
+    INSERT INTO custom_strategies (name, display_name, description, code, created_at)
+    VALUES (%s, %s, %s, %s, %s)
+    """
+    execute_query(conn, cursor, query, (name, display_name, description, code, created_at))
+    conn.commit()
+    conn.close()
+
+def update_custom_strategy(name: str, display_name: str, description: str, code: str):
+    conn = get_db_connection()
+    is_pg = is_postgresql()
+    cursor = conn.cursor()
+
+    query = """
+    UPDATE custom_strategies
+    SET display_name = %s, description = %s, code = %s
+    WHERE name = %s
+    """
+    execute_query(conn, cursor, query, (display_name, description, code, name))
+    conn.commit()
+    conn.close()
+
+def get_all_custom_strategies():
+    conn = get_db_connection()
+    is_pg = is_postgresql()
+    if is_pg:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cursor = conn.cursor()
+
+    query = "SELECT id, name, display_name, description, created_at FROM custom_strategies ORDER BY created_at DESC"
+    execute_query(conn, cursor, query)
+    rows = fetch_all_as_dicts(cursor, is_pg)
+    conn.close()
+    return rows
+
+def get_custom_strategy_by_name(name: str):
+    conn = get_db_connection()
+    is_pg = is_postgresql()
+    if is_pg:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cursor = conn.cursor()
+
+    query = "SELECT * FROM custom_strategies WHERE name = %s"
+    execute_query(conn, cursor, query, (name,))
+    row = fetch_one_as_dict(cursor, is_pg)
+    conn.close()
+    return row
+
+def delete_custom_strategy(name: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    query = "DELETE FROM custom_strategies WHERE name = %s"
+    execute_query(conn, cursor, query, (name,))
     conn.commit()
     conn.close()
