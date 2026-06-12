@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
+DB_PATH = os.getenv("DATABASE_URL", os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db"))
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)

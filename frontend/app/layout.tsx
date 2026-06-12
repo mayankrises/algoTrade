@@ -12,6 +12,7 @@ import {
   Wifi, 
   WifiOff 
 } from "lucide-react";
+import { API_BASE_URL } from "./config";
 import "./globals.css";
 
 export default function RootLayout({
@@ -26,7 +27,7 @@ export default function RootLayout({
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const res = await fetch("http://localhost:8000/health");
+        const res = await fetch(`${API_BASE_URL}/health`);
         if (res.ok) {
           setApiConnected(true);
         } else {

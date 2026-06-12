@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Play, Square, Activity, DollarSign, Percent, TrendingUp, ShieldAlert, Cpu } from "lucide-react";
 import { createChart, IChartApi, CandlestickSeries } from "lightweight-charts";
+import { API_BASE_URL } from "../config";
+
 
 interface Position {
   entry_price: number;
@@ -137,7 +139,7 @@ export default function PaperTrading() {
   // Fetch status helper
   const fetchStatus = async () => {
     try {
-      const res = await fetch("http://localhost:8000/paper/status");
+      const res = await fetch(`${API_BASE_URL}/paper/status`);
       if (!res.ok) {
         throw new Error("Failed to connect to backend paper status API.");
       }
@@ -184,7 +186,7 @@ export default function PaperTrading() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/paper/start", {
+      const res = await fetch(`${API_BASE_URL}/paper/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -214,7 +216,7 @@ export default function PaperTrading() {
     setError(null);
 
     try {
-      const res = await fetch("http://localhost:8000/paper/stop", {
+      const res = await fetch(`${API_BASE_URL}/paper/stop`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

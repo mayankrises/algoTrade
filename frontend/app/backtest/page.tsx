@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Play, Calendar, DollarSign, Award, Percent, TrendingDown, Layers } from "lucide-react";
 import { createChart, IChartApi, CandlestickSeries, LineSeries, createSeriesMarkers } from "lightweight-charts";
+import { API_BASE_URL } from "../config";
+
 
 interface MetricType {
   final_capital: number;
@@ -224,7 +226,7 @@ export default function Backtest() {
     setChartData([]);
 
     try {
-      const res = await fetch("http://localhost:8000/backtest", {
+      const res = await fetch(`${API_BASE_URL}/backtest`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

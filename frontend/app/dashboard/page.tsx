@@ -10,6 +10,7 @@ import {
   PieChart 
 } from "lucide-react";
 import Link from "next/link";
+import { API_BASE_URL } from "../config";
 
 interface Trade {
   id: number;
@@ -55,8 +56,8 @@ export default function Dashboard() {
     const fetchData = async () => {
       try {
         const [statusRes, tradesRes] = await Promise.all([
-          fetch("http://localhost:8000/paper/status"),
-          fetch("http://localhost:8000/trades")
+          fetch(`${API_BASE_URL}/paper/status`),
+          fetch(`${API_BASE_URL}/trades`)
         ]);
 
         if (!statusRes.ok || !tradesRes.ok) {

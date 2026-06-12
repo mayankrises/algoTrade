@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Cpu, ArrowRight, Play, Info } from "lucide-react";
 import Link from "next/link";
+import { API_BASE_URL } from "../config";
 
 interface Strategy {
   id: string;
@@ -21,7 +22,7 @@ export default function Strategies() {
   useEffect(() => {
     const fetchStrategies = async () => {
       try {
-        const res = await fetch("http://localhost:8000/strategies");
+        const res = await fetch(`${API_BASE_URL}/strategies`);
         if (!res.ok) {
           throw new Error("Failed to fetch strategies from API backend.");
         }

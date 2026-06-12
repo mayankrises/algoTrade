@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { History, Search, ArrowUpDown, Filter } from "lucide-react";
+import { API_BASE_URL } from "../config";
 
 interface Trade {
   id: number;
@@ -30,7 +31,7 @@ export default function TradeLog() {
   useEffect(() => {
     const fetchTrades = async () => {
       try {
-        const res = await fetch("http://localhost:8000/trades");
+        const res = await fetch(`${API_BASE_URL}/trades`);
         if (!res.ok) {
           throw new Error("Failed to load trades from API database.");
         }
